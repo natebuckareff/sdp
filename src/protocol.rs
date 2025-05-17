@@ -1,8 +1,20 @@
+use std::fmt::{self, Display};
+
 pub const PROTOCOL_VERSION: u16 = 1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
     Send,
     Recv,
+}
+
+impl Display for Side {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Side::Send => write!(f, "send"),
+            Side::Recv => write!(f, "recv"),
+        }
+    }
 }
 
 pub struct ConnectionBond {
@@ -40,11 +52,23 @@ impl SendId {
     }
 }
 
+impl Into<u32> for SendId {
+    fn into(self) -> u32 {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RecvId(u32);
 
 impl RecvId {
     pub fn new(id: u32) -> Self {
         Self(id)
+    }
+}
+
+impl Into<u32> for RecvId {
+    fn into(self) -> u32 {
+        self.0
     }
 }

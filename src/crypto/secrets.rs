@@ -1,9 +1,10 @@
+use aead::KeyInit;
 use anyhow::{Result, anyhow};
 use bytes::BytesMut;
 use chacha20::cipher::{KeyIvInit, StreamCipher};
 use chacha20poly1305::Nonce;
 use chacha20poly1305::aead::AeadMutInPlace;
-use x25519_dalek::EphemeralSecret;
+use x25519_dalek::SharedSecret;
 use zeroize::Zeroizing;
 
 use crate::protocol::{ConnectionBond, Side};
@@ -12,35 +13,63 @@ const CONNECTION_SECRET_LEN: usize = 32;
 const HEADER_SECRET_LEN: usize = 32;
 const STREAM_SECRET_LEN: usize = 32;
 const STATIC_IV_LEN: usize = 12;
+const AED_KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 const TAG_LEN: usize = 16;
 
+fn hkdf_expand<const N: usize>(ikm: &[u8], label: &str) -> Result<Zeroizing<[u8; N]>> {
+    let mut okm = Zeroizing::new([0u8; N]);
+    let hkdf = hkdf::Hkdf::<sha2::Sha256>::new(None, ikm);
+    hkdf.expand(label.as_bytes(), okm.as_mut_slice())
+        .map_err(|_| anyhow!("failed to derive connection secret"))?;
+    Ok(okm)
+}
+
 pub struct ConnectionSecret {
+    side: Side,
+    bond: ConnectionBond,
     secret: Zeroizing<[u8; CONNECTION_SECRET_LEN]>,
 }
 
 impl ConnectionSecret {
-    pub fn new(ephemeral_secret: &EphemeralSecret, side: Side, bond: &ConnectionBond) -> Self {
-        todo!()
+    pub fn new(shared_secret: &SharedSecret, side: Side, bond: ConnectionBond) -> Result<Self> {
+        let cid: u32 = bond.get_connection_id(side);
+        let label = format!("sdp connection secret {} {}", cid, side);
+        let secret = hkdf_expand(shared_secret.as_bytes(), &label)?;
+        Ok(Self { side, bond, secret })
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         CONNECTION_SECRET_LEN
     }
 
-    pub fn derive_header_secret(&self) -> HeaderSecret {
-        todo!()
+    fn derive_header_secret(&self) -> Result<HeaderSecret> {
+        let cid: u32 = self.bond.get_connection_id(self.side);
+        let label = format!("sdp header secret {} {}", cid, self.side);
+        let secret = hkdf_expand::<HEADER_SECRET_LEN>(self.secret.as_slice(), &label)?;
+        let key = chacha20::Key::from_slice(secret.as_slice());
+        Ok(HeaderSecret {
+            side: self.side,
+            key: *key,
+            mask: vec![],
+        })
     }
 
-    pub fn derive_stream_secret(&self, stream_id: u32) -> StreamSecret {
-        todo!()
+    fn derive_stream_secret(&self, stream_id: u32) -> Result<StreamSecret> {
+        let cid: u32 = self.bond.get_connection_id(self.side);
+        let label = format!("sdp stream secret {} {} {}", cid, stream_id, self.side);
+        let secret = hkdf_expand::<STREAM_SECRET_LEN>(self.secret.as_slice(), &label)?;
+        Ok(StreamSecret {
+            side: self.side,
+            stream_id,
+            secret,
+        })
     }
 }
 
 pub struct HeaderSecret {
     side: Side,
-    secret: Zeroizing<[u8; HEADER_SECRET_LEN]>, // remove?
-    key: chacha20::Key,                         // XXX
+    key: chacha20::Key,
     mask: Vec<u8>,
 }
 
@@ -79,16 +108,24 @@ pub struct StreamSecret {
 }
 
 impl StreamSecret {
-    pub fn rekey(&mut self) {
-        todo!()
+    pub fn rekey(&mut self) -> Result<()> {
+        let label = format!("sdp stream rekey {} {}", self.stream_id, self.side);
+        let secret = hkdf_expand::<STREAM_SECRET_LEN>(self.secret.as_slice(), &label)?;
+        self.secret = secret;
+        Ok(())
     }
 
-    pub fn derive_stativ_iv(&self) -> StaticIv {
-        todo!()
+    pub fn derive_stativ_iv(&self) -> Result<StaticIv> {
+        let label = format!("sdp static iv {} {}", self.stream_id, self.side);
+        let secret = hkdf_expand::<STATIC_IV_LEN>(self.secret.as_slice(), &label)?;
+        Ok(StaticIv { secret })
     }
 
-    pub fn derive_aead_key(&self) -> AeadKey {
-        todo!()
+    pub fn derive_aead_key(&self) -> Result<AeadKey> {
+        let label = format!("sdp aead key {} {}", self.stream_id, self.side);
+        let secret = hkdf_expand::<AED_KEY_LEN>(self.secret.as_slice(), &label)?;
+        let cipher = chacha20poly1305::ChaCha20Poly1305::new(&(*secret).into());
+        Ok(AeadKey { cipher })
     }
 }
 

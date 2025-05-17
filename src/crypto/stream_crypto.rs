@@ -3,10 +3,7 @@ use bytes::BytesMut;
 
 use crate::protocol::{ConnectionBond, Side};
 
-use super::{
-    ConnectionCrypto,
-    secrets::{AeadKey, HeaderSecret, StaticIv, StreamSecret},
-};
+use super::secrets::{AeadKey, HeaderSecret, StaticIv, StreamSecret};
 
 const PACKET_NUMBER_ROLLOVER: u64 = 1 << 62;
 
@@ -27,11 +24,12 @@ impl StreamCoreCrypto {
         self.counter
     }
 
-    fn rekey(&mut self) {
-        self.stream_secret.rekey();
-        self.static_iv = self.stream_secret.derive_stativ_iv();
-        self.aead_key = self.stream_secret.derive_aead_key();
+    fn rekey(&mut self) -> Result<()> {
+        self.stream_secret.rekey()?;
+        self.static_iv = self.stream_secret.derive_stativ_iv()?;
+        self.aead_key = self.stream_secret.derive_aead_key()?;
         self.counter = 0;
+        Ok(())
     }
 
     fn encrypt(&mut self, buf: &mut BytesMut, partial_header_len: usize) -> Result<()> {
@@ -40,7 +38,7 @@ impl StreamCoreCrypto {
 
         // Rekey if the counter should rollover
         if self.counter >= PACKET_NUMBER_ROLLOVER {
-            self.rekey();
+            self.rekey().context("failed to rekey")?;
         }
 
         let header_len = partial_header_len + 8;
