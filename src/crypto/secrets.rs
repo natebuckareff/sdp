@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use bytes::BytesMut;
 use chacha20::cipher::{KeyIvInit, StreamCipher};
 use chacha20poly1305::Nonce;
@@ -13,6 +13,7 @@ const HEADER_SECRET_LEN: usize = 32;
 const STREAM_SECRET_LEN: usize = 32;
 const STATIC_IV_LEN: usize = 12;
 const NONCE_LEN: usize = 12;
+const TAG_LEN: usize = 16;
 
 pub struct ConnectionSecret {
     secret: Zeroizing<[u8; CONNECTION_SECRET_LEN]>,
@@ -44,20 +45,26 @@ pub struct HeaderSecret {
 }
 
 impl HeaderSecret {
-    pub fn mask_header(&mut self, header_bytes: &mut [u8], ciphertext: &[u8]) -> Result<()> {
-        if ciphertext.len() < NONCE_LEN {
-            return Err(anyhow::anyhow!(
+    fn derive_mask(&mut self, header_len: usize, ciphertext: &[u8]) -> &[u8] {
+        let nonce = Nonce::from_slice(&ciphertext[..NONCE_LEN]);
+        let mut cipher = chacha20::ChaCha20::new(&self.key, nonce);
+
+        self.mask.resize(header_len, 0);
+        cipher.apply_keystream(&mut self.mask);
+
+        &self.mask
+    }
+
+    pub fn apply_header_mask(&mut self, header_bytes: &mut [u8], ciphertext: &[u8]) -> Result<()> {
+        if ciphertext.len() - TAG_LEN < NONCE_LEN {
+            return Err(anyhow!(
                 "ciphertext must at least as long as the nonce length"
             ));
         }
 
-        let nonce = Nonce::from_slice(&ciphertext[..NONCE_LEN]);
-        let mut cipher = chacha20::ChaCha20::new(&self.key, nonce);
+        let mask = self.derive_mask(header_bytes.len(), ciphertext);
 
-        self.mask.resize(header_bytes.len(), 0);
-        cipher.apply_keystream(&mut self.mask);
-
-        for (header_byte, mask_byte) in header_bytes.iter_mut().zip(self.mask.iter_mut()) {
+        for (header_byte, mask_byte) in header_bytes.iter_mut().zip(mask.iter()) {
             *header_byte ^= *mask_byte;
         }
 
@@ -120,6 +127,7 @@ impl AeadKey {
         header: &[u8],
         plaintext: &mut BytesMut,
     ) -> Result<()> {
+        plaintext.reserve(TAG_LEN);
         self.cipher.encrypt_in_place(&nonce, header, plaintext)?;
         Ok(())
     }
@@ -130,6 +138,9 @@ impl AeadKey {
         header: &[u8],
         ciphertext: &mut BytesMut,
     ) -> Result<()> {
+        // Expected ciphertext format: ciphertext || auth_tag
+        // plaintext_len = ciphertext_len - TAG_LEN
+        // ciphertext is truncated to plaintext_len
         self.cipher.decrypt_in_place(&nonce, header, ciphertext)?;
         Ok(())
     }
