@@ -113,10 +113,17 @@ stream_secret = hkdf_sha256(
 static_iv = hkdf_sha256(stream_secret, "sdp static iv {side}")
 aead_key  = hkdf_sha256(stream_secret, "sdp aead key {side})
 
-encrypt_stream_payload(packet_number, plaintext) =
+encrypt_stream_payload(stream_id, packet_number, plaintext) =
+    ciphertext || tag
     where
-        ciphertext, tag = chacha20_poly1305(nonce, aead_key, plaintext)
-        nonce           = stream_nonce(static_iv, packet_number)
+        nonce = stream_nonce(static_iv, packet_number)
+        associated_data = stream_id || packet_number
+        ciphertext, tag = chacha20_poly1305_encrypt(
+            aead_key,
+            nonce,
+            associated_data,
+            plaintext
+        )
 
 stream_nonce(static_iv, packet_number) :=
     stativ_iv ^ left_pad_zero(len(static_iv) - len(bytes), bytes)
