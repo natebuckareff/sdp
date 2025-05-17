@@ -1,7 +1,8 @@
 use anyhow::Result;
 use bytes::BytesMut;
+use chacha20::cipher::{KeyIvInit, StreamCipher};
 use chacha20poly1305::Nonce;
-use chacha20poly1305::aead::{Aead, AeadMutInPlace, KeyInit};
+use chacha20poly1305::aead::AeadMutInPlace;
 use x25519_dalek::EphemeralSecret;
 use zeroize::Zeroizing;
 
@@ -11,6 +12,7 @@ const CONNECTION_SECRET_LEN: usize = 32;
 const HEADER_SECRET_LEN: usize = 32;
 const STREAM_SECRET_LEN: usize = 32;
 const STATIC_IV_LEN: usize = 12;
+const NONCE_LEN: usize = 12;
 
 pub struct ConnectionSecret {
     secret: Zeroizing<[u8; CONNECTION_SECRET_LEN]>,
@@ -36,14 +38,30 @@ impl ConnectionSecret {
 
 pub struct HeaderSecret {
     side: Side,
-    secret: Zeroizing<[u8; HEADER_SECRET_LEN]>,
+    secret: Zeroizing<[u8; HEADER_SECRET_LEN]>, // remove?
+    key: chacha20::Key,                         // XXX
+    mask: Vec<u8>,
 }
 
 impl HeaderSecret {
-    pub fn mask_header(&self, buf: &mut [u8], header_len: usize) -> Result<()> {
-        // Expects `header || ciphertext`
-        // Will sample N bytes from ciphertext, encrypt, and mask with XOR
-        todo!()
+    pub fn mask_header(&mut self, header_bytes: &mut [u8], ciphertext: &[u8]) -> Result<()> {
+        if ciphertext.len() < NONCE_LEN {
+            return Err(anyhow::anyhow!(
+                "ciphertext must at least as long as the nonce length"
+            ));
+        }
+
+        let nonce = Nonce::from_slice(&ciphertext[..NONCE_LEN]);
+        let mut cipher = chacha20::ChaCha20::new(&self.key, nonce);
+
+        self.mask.resize(header_bytes.len(), 0);
+        cipher.apply_keystream(&mut self.mask);
+
+        for (header_byte, mask_byte) in header_bytes.iter_mut().zip(self.mask.iter_mut()) {
+            *header_byte ^= *mask_byte;
+        }
+
+        Ok(())
     }
 }
 

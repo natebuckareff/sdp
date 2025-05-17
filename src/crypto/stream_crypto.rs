@@ -56,7 +56,7 @@ impl StreamCrypto {
 
         // Mask the header after using as associated data
         self.header_secret
-            .mask_header(&mut buf[..], partial_header_len + 8)?;
+            .mask_header(&mut buf[..partial_header_len + 8], &encrypt_buf[..])?;
 
         self.counter += 1;
 

@@ -49,7 +49,7 @@ reject_payload ::= connection_id error_code
 
 start_stream_payload ::=
     connection_id
-    header_mask(stream_id stream_flags)
+    mask_header(stream_id, stream_flags)
 
 stream_flags ::=
     | ordered_stream_flag
@@ -60,7 +60,7 @@ unordered_stream_flag ::= 0x01
 
 stream_data_payload ::=
     connection_id
-    header_mask(stream_id packet_number)
+    mask_header(stream_id, packet_number)
     ciphertext
     auth_tag
 ```
@@ -87,19 +87,15 @@ connection_secret = hkdf_sha256(
 
 The connection secret is derived using HKDF-SHA256 with a label unique to current connection.
 
-The stream packet header (stream ID and packet number) are masked by xoring the header bytes with an encrypted sample of the adjacent ciphertext.
+The stream packet header (stream ID and packet number) is masked by xoring the header bytes with an encrypted sample of the adjacent ciphertext. This sample is computed by deriving a ChaCha20 nonce from the first N ciphertext bytes, and then encrypting H 0-bytes, where H is the header length, using the nonce and the header secret as key. The resulting H bytes are then XORed with the header to mask it.
 
 ```
 header_secret = hkdf_sha256(connection_secret, "sdp header secret {side}")
 
-header_mask(header, ciphertext) =
-    chacha20_encrypt(header_secret, sample(header, ciphertext)) ^ header
-
-chacha20_encrypt(key, plaintext) = iv || chacha20(key, iv, plaintext)
-    where
-        iv = csrng()
-
-sample(header, ciphertext) = ciphertext[0..len(header)]
+mask_header(header, ciphertext) =
+    nonce = ciphertext[0..chacha20_nonce_len]
+    mask = zeroes(len(header))
+    chacha20_encrypt(header_secret, nonce, mask) ^ header
 ```
 
 The stream packet payload is encrypted with ChaCha20-Poly1305.
@@ -114,21 +110,19 @@ static_iv = hkdf_sha256(stream_secret, "sdp static iv {side}")
 aead_key  = hkdf_sha256(stream_secret, "sdp aead key {side})
 
 encrypt_stream_payload(stream_id, packet_number, plaintext) =
+    nonce = stream_nonce(static_iv, packet_number)
+    associated_data = stream_id || packet_number
+    ciphertext, tag = chacha20_poly1305_encrypt(
+        aead_key,
+        nonce,
+        associated_data,
+        plaintext
+    )
     ciphertext || tag
-    where
-        nonce = stream_nonce(static_iv, packet_number)
-        associated_data = stream_id || packet_number
-        ciphertext, tag = chacha20_poly1305_encrypt(
-            aead_key,
-            nonce,
-            associated_data,
-            plaintext
-        )
 
 stream_nonce(static_iv, packet_number) :=
+    bytes = be_u64_bytes(packet_number)
     stativ_iv ^ left_pad_zero(len(static_iv) - len(bytes), bytes)
-    where
-        bytes = be_u64_bytes(packet_number)
 ```
 
 The packet number is incremented for every packet sent in a stream. Once it equals or exceeds 1 << 62 a new stream secret is derived using the previous stream secret as input, and the static IV and AEAD keys are also rederived.
