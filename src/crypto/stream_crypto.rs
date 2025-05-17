@@ -47,12 +47,14 @@ impl StreamCrypto {
         // Derive the nonce
         let nonce = self.static_iv.derive_nonce(self.counter);
 
-        // Encrypt the plaintext in-place
-        let _ = self
-            .aead_key
-            .encrypt(nonce, &mut buf[partial_header_len + 8..])?;
+        // Split buffer to encrypt-in-place and append auth tag
+        let mut encrypt_buf = buf.split_off(partial_header_len + 8);
 
-        // Mask the header
+        // Encrypt in-place and append auth tag
+        self.aead_key
+            .encrypt(nonce, &buf[..partial_header_len + 8], &mut encrypt_buf)?;
+
+        // Mask the header after using as associated data
         self.header_secret
             .mask_header(&mut buf[..], partial_header_len + 8)?;
 

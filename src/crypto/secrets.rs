@@ -1,6 +1,7 @@
 use anyhow::Result;
 use bytes::BytesMut;
 use chacha20poly1305::Nonce;
+use chacha20poly1305::aead::{Aead, AeadMutInPlace, KeyInit};
 use x25519_dalek::EphemeralSecret;
 use zeroize::Zeroizing;
 
@@ -95,12 +96,23 @@ pub struct AeadKey {
 }
 
 impl AeadKey {
-    pub fn encrypt(&self, nonce: chacha20poly1305::Nonce, plaintext: &mut [u8]) -> Result<()> {
-        // Encrypt in-place
-        todo!()
+    pub fn encrypt(
+        &mut self,
+        nonce: chacha20poly1305::Nonce,
+        header: &[u8],
+        plaintext: &mut BytesMut,
+    ) -> Result<()> {
+        self.cipher.encrypt_in_place(&nonce, header, plaintext)?;
+        Ok(())
     }
 
-    pub fn decrypt(&self, nonce: chacha20poly1305::Nonce, ciphertext: &mut [u8]) -> Result<()> {
-        todo!()
+    pub fn decrypt(
+        &mut self,
+        nonce: chacha20poly1305::Nonce,
+        header: &[u8],
+        ciphertext: &mut BytesMut,
+    ) -> Result<()> {
+        self.cipher.decrypt_in_place(&nonce, header, ciphertext)?;
+        Ok(())
     }
 }
