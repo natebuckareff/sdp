@@ -1,6 +1,6 @@
 mod connection_crypto;
 mod secrets;
-mod session_crypto;
+mod stream_crypto;
 
 pub use connection_crypto::*;
-pub use session_crypto::*;
+pub use stream_crypto::*;

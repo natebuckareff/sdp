@@ -10,7 +10,7 @@ use super::{
 
 const PACKET_NUMBER_ROLLOVER: u64 = 1 << 62;
 
-pub struct SessionCrypto {
+pub struct StreamCrypto {
     header_secret: HeaderSecret,
     stream_secret: StreamSecret,
     static_iv: StaticIv,
@@ -18,7 +18,7 @@ pub struct SessionCrypto {
     counter: u64,
 }
 
-impl SessionCrypto {
+impl StreamCrypto {
     pub fn new(side: Side, bond: ConnectionBond) -> Self {
         todo!()
     }
