@@ -84,6 +84,9 @@ impl StreamCoreCrypto {
             .apply_header_mask(&mut buf[..header_len], &plaintext_buf)
             .context("failed to mask header")?;
 
+        // Append the encrypted payload (ciphertext + tag) back to the main buffer
+        buf.unsplit(plaintext_buf);
+
         self.counter += 1;
 
         Ok(())
@@ -97,7 +100,7 @@ impl StreamCoreCrypto {
 
         // Rekey if the counter should rollover
         if self.counter >= PACKET_NUMBER_ROLLOVER {
-            self.rekey();
+            self.rekey().context("failed to rekey")?;
         }
 
         let header_len = partial_header_len + 8;
@@ -127,7 +130,7 @@ impl StreamCoreCrypto {
         self.counter += 1;
 
         if self.counter >= PACKET_NUMBER_ROLLOVER {
-            self.rekey();
+            self.rekey().context("failed to rekey")?;
         }
 
         Ok(())
@@ -151,5 +154,81 @@ pub struct StreamDecryptor {
 impl StreamDecryptor {
     pub fn decrypt(&mut self, buf: &mut BytesMut, partial_header_len: usize) -> Result<()> {
         self.core_crypto.decrypt(buf, partial_header_len)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::Side;
+    use anyhow::Result;
+    use bytes::BytesMut;
+    use chacha20::Key as ChaChaKey;
+    use zeroize::Zeroizing;
+    // Import necessary items from the secrets module
+    use crate::crypto::secrets::{
+        HEADER_SECRET_LEN, HeaderSecret, STREAM_SECRET_LEN, StreamSecret, TAG_LEN,
+    };
+
+    fn setup_crypto_direct(stream_id: u32) -> Result<(StreamEncryptor, StreamDecryptor)> {
+        let side = Side::Send;
+
+        let dummy_key_bytes = [0u8; HEADER_SECRET_LEN];
+        let header_key = ChaChaKey::from_slice(&dummy_key_bytes);
+        let header_secret = HeaderSecret::new(side, *header_key);
+
+        let dummy_secret_bytes = Zeroizing::new([1u8; STREAM_SECRET_LEN]);
+        // Assuming StreamSecret::new_for_test is available and pub(crate) in secrets.rs
+        let stream_secret = StreamSecret::new_for_test(side, stream_id, dummy_secret_bytes);
+
+        StreamCoreCrypto::new(stream_id, header_secret, stream_secret)
+    }
+
+    #[test]
+    fn test_stream_encryptor_encrypts_successfully() -> Result<()> {
+        let stream_id = 1;
+        let (mut encryptor, _decryptor) = setup_crypto_direct(stream_id)?;
+
+        const PARTIAL_HEADER_LEN: usize = 4;
+        let mut buffer = BytesMut::new();
+        buffer.extend_from_slice(&[0u8; PARTIAL_HEADER_LEN]);
+        buffer.extend_from_slice(&[0u8; 8]); // Space for packet number
+        let original_plaintext = b"hello world!!";
+        buffer.extend_from_slice(original_plaintext);
+
+        let header_and_pn_len = PARTIAL_HEADER_LEN + 8;
+        let expected_ciphertext_len = header_and_pn_len + original_plaintext.len() + TAG_LEN;
+
+        encryptor.encrypt(&mut buffer, PARTIAL_HEADER_LEN)?;
+
+        assert_eq!(buffer.len(), expected_ciphertext_len);
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_decryptor_decrypts_successfully() -> Result<()> {
+        let stream_id = 1;
+        let (mut encryptor, mut decryptor) = setup_crypto_direct(stream_id)?;
+
+        let partial_header_len = 4;
+        let mut buffer = BytesMut::new();
+        let partial_header_content = &[1, 2, 3, 4];
+        buffer.extend_from_slice(partial_header_content);
+        buffer.extend_from_slice(&[0u8; 8]); // Space for packet number
+
+        let original_plaintext = b"secret message";
+        buffer.extend_from_slice(original_plaintext);
+
+        let mut encrypt_buffer = buffer.clone();
+
+        encryptor.encrypt(&mut encrypt_buffer, partial_header_len)?;
+        assert_ne!(encrypt_buffer.as_ref(), buffer.as_ref());
+
+        let mut decrypt_buffer = encrypt_buffer.clone();
+        decryptor.decrypt(&mut decrypt_buffer, partial_header_len)?;
+
+        assert_eq!(decrypt_buffer.as_ref(), original_plaintext.as_ref());
+
+        Ok(())
     }
 }

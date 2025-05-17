@@ -9,13 +9,14 @@ use zeroize::Zeroizing;
 
 use crate::protocol::{ConnectionBond, Side};
 
-const CONNECTION_SECRET_LEN: usize = 32;
-const HEADER_SECRET_LEN: usize = 32;
-const STREAM_SECRET_LEN: usize = 32;
-const STATIC_IV_LEN: usize = 12;
-const AED_KEY_LEN: usize = 32;
-const NONCE_LEN: usize = 12;
-const TAG_LEN: usize = 16;
+// Make constants public for use in tests and other modules if needed
+pub const CONNECTION_SECRET_LEN: usize = 32;
+pub const HEADER_SECRET_LEN: usize = 32;
+pub const STREAM_SECRET_LEN: usize = 32;
+pub const STATIC_IV_LEN: usize = 12;
+pub const AED_KEY_LEN: usize = 32;
+pub const NONCE_LEN: usize = 12;
+pub const TAG_LEN: usize = 16;
 
 fn hkdf_expand<const N: usize>(ikm: &[u8], label: &str) -> Result<Zeroizing<[u8; N]>> {
     let mut okm = Zeroizing::new([0u8; N]);
@@ -48,11 +49,7 @@ impl ConnectionSecret {
         let label = format!("sdp header secret {} {}", cid, self.side);
         let secret = hkdf_expand::<HEADER_SECRET_LEN>(self.secret.as_slice(), &label)?;
         let key = chacha20::Key::from_slice(secret.as_slice());
-        Ok(HeaderSecret {
-            side: self.side,
-            key: *key,
-            mask: vec![],
-        })
+        Ok(HeaderSecret::new(self.side, *key))
     }
 
     fn derive_stream_secret(&self, stream_id: u32) -> Result<StreamSecret> {
@@ -75,6 +72,14 @@ pub struct HeaderSecret {
 }
 
 impl HeaderSecret {
+    pub fn new(side: Side, key: chacha20::Key) -> Self {
+        Self {
+            side,
+            key,
+            mask: vec![],
+        }
+    }
+
     fn derive_mask(&mut self, header_len: usize, ciphertext: &[u8]) -> &[u8] {
         let nonce = Nonce::from_slice(&ciphertext[..NONCE_LEN]);
         let mut cipher = chacha20::ChaCha20::new(&self.key, nonce);
@@ -132,6 +137,19 @@ impl StreamSecret {
         let secret = hkdf_expand::<AED_KEY_LEN>(self.secret.as_slice(), &label)?;
         let cipher = chacha20poly1305::ChaCha20Poly1305::new(&(*secret).into());
         Ok(AeadKey { cipher })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        side: Side,
+        stream_id: u32,
+        secret: Zeroizing<[u8; STREAM_SECRET_LEN]>,
+    ) -> Self {
+        Self {
+            side,
+            stream_id,
+            secret,
+        }
     }
 }
 
