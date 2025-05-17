@@ -38,7 +38,9 @@ pub struct HeaderSecret {
 }
 
 impl HeaderSecret {
-    pub fn mask_header(&self, header: &BytesMut, ciphertext: &[u8]) -> Result<()> {
+    pub fn mask_header(&self, buf: &mut [u8], header_len: usize) -> Result<()> {
+        // Expects `header || ciphertext`
+        // Will sample N bytes from ciphertext, encrypt, and mask with XOR
         todo!()
     }
 }
@@ -68,8 +70,9 @@ pub struct StaticIv {
 }
 
 impl StaticIv {
-    pub fn derive_nonce(&self, packet_number: u64) -> () {
-        // TODO: return type
+    pub fn derive_nonce(&self, packet_number: u64) -> chacha20poly1305::Nonce {
+        // - Left pad packet number with 0s to static IV size
+        // - XOR static IV and padded packed number
         todo!()
     }
 }
@@ -79,11 +82,12 @@ pub struct AeadKey {
 }
 
 impl AeadKey {
-    pub fn encrypt(&self, nonce: chacha20poly1305::Nonce, plaintext: &BytesMut) -> Result<()> {
+    pub fn encrypt(&self, nonce: chacha20poly1305::Nonce, plaintext: &mut [u8]) -> Result<()> {
+        // Encrypt in-place
         todo!()
     }
 
-    pub fn decrypt(&self, nonce: chacha20poly1305::Nonce, ciphertext: &BytesMut) -> Result<()> {
+    pub fn decrypt(&self, nonce: chacha20poly1305::Nonce, ciphertext: &mut [u8]) -> Result<()> {
         todo!()
     }
 }
