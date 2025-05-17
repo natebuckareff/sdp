@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 use bytes::BytesMut;
 
-use crate::protocol::{ConnectionBond, Side};
-
 use super::secrets::{AeadKey, HeaderSecret, StaticIv, StreamSecret};
 
 const PACKET_NUMBER_ROLLOVER: u64 = 1 << 62;
 
+#[derive(Clone)]
 struct StreamCoreCrypto {
+    stream_id: u32,
     header_secret: HeaderSecret,
     stream_secret: StreamSecret,
     static_iv: StaticIv,
@@ -16,8 +16,27 @@ struct StreamCoreCrypto {
 }
 
 impl StreamCoreCrypto {
-    pub fn new(side: Side, bond: ConnectionBond) -> Self {
-        todo!()
+    pub fn new(
+        stream_id: u32,
+        header_secret: HeaderSecret,
+        stream_secret: StreamSecret,
+    ) -> Result<(StreamEncryptor, StreamDecryptor)> {
+        assert!(stream_id == stream_secret.stream_id());
+        let static_iv = stream_secret.derive_static_iv()?;
+        let aead_key = stream_secret.derive_aead_key()?;
+        let core_crypto = Self {
+            stream_id,
+            header_secret,
+            stream_secret,
+            static_iv,
+            aead_key,
+            counter: 0,
+        };
+        let encryptor = StreamEncryptor {
+            core_crypto: core_crypto.clone(),
+        };
+        let decryptor = StreamDecryptor { core_crypto };
+        Ok((encryptor, decryptor))
     }
 
     fn packet_number(&self) -> u64 {
@@ -26,7 +45,7 @@ impl StreamCoreCrypto {
 
     fn rekey(&mut self) -> Result<()> {
         self.stream_secret.rekey()?;
-        self.static_iv = self.stream_secret.derive_stativ_iv()?;
+        self.static_iv = self.stream_secret.derive_static_iv()?;
         self.aead_key = self.stream_secret.derive_aead_key()?;
         self.counter = 0;
         Ok(())
@@ -120,12 +139,6 @@ pub struct StreamEncryptor {
 }
 
 impl StreamEncryptor {
-    pub fn new(side: Side, bond: ConnectionBond) -> Self {
-        Self {
-            core_crypto: StreamCoreCrypto::new(side, bond),
-        }
-    }
-
     pub fn encrypt(&mut self, buf: &mut BytesMut, partial_header_len: usize) -> Result<()> {
         self.core_crypto.encrypt(buf, partial_header_len)
     }
@@ -136,12 +149,6 @@ pub struct StreamDecryptor {
 }
 
 impl StreamDecryptor {
-    pub fn new(side: Side, bond: ConnectionBond) -> Self {
-        Self {
-            core_crypto: StreamCoreCrypto::new(side, bond),
-        }
-    }
-
     pub fn decrypt(&mut self, buf: &mut BytesMut, partial_header_len: usize) -> Result<()> {
         self.core_crypto.decrypt(buf, partial_header_len)
     }

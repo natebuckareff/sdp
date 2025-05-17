@@ -67,6 +67,7 @@ impl ConnectionSecret {
     }
 }
 
+#[derive(Clone)]
 pub struct HeaderSecret {
     side: Side,
     key: chacha20::Key,
@@ -101,6 +102,7 @@ impl HeaderSecret {
     }
 }
 
+#[derive(Clone)]
 pub struct StreamSecret {
     side: Side,
     stream_id: u32,
@@ -115,7 +117,11 @@ impl StreamSecret {
         Ok(())
     }
 
-    pub fn derive_stativ_iv(&self) -> Result<StaticIv> {
+    pub fn stream_id(&self) -> u32 {
+        self.stream_id
+    }
+
+    pub fn derive_static_iv(&self) -> Result<StaticIv> {
         let label = format!("sdp static iv {} {}", self.stream_id, self.side);
         let secret = hkdf_expand::<STATIC_IV_LEN>(self.secret.as_slice(), &label)?;
         Ok(StaticIv { secret })
@@ -129,6 +135,7 @@ impl StreamSecret {
     }
 }
 
+#[derive(Clone)]
 pub struct StaticIv {
     secret: Zeroizing<[u8; STATIC_IV_LEN]>,
 }
@@ -153,6 +160,7 @@ impl StaticIv {
     }
 }
 
+#[derive(Clone)]
 pub struct AeadKey {
     cipher: chacha20poly1305::ChaCha20Poly1305,
 }
