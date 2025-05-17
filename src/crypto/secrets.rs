@@ -1,5 +1,6 @@
 use anyhow::Result;
 use bytes::BytesMut;
+use chacha20poly1305::Nonce;
 use x25519_dalek::EphemeralSecret;
 use zeroize::Zeroizing;
 
@@ -70,10 +71,22 @@ pub struct StaticIv {
 }
 
 impl StaticIv {
-    pub fn derive_nonce(&self, packet_number: u64) -> chacha20poly1305::Nonce {
-        // - Left pad packet number with 0s to static IV size
-        // - XOR static IV and padded packed number
-        todo!()
+    pub fn derive_nonce(&self, packet_number: u64) -> Nonce {
+        let mut padded_packet_number = [0u8; STATIC_IV_LEN];
+        let packet_number_bytes = packet_number.to_be_bytes();
+
+        // Copy packet_number_bytes to the end of padded_packet_number
+        // packet_number_bytes is 8 bytes, STATIC_IV_LEN is 12 bytes.
+        // So, the first 4 bytes of padded_packet_number remain 0.
+        padded_packet_number[STATIC_IV_LEN - packet_number_bytes.len()..]
+            .copy_from_slice(&packet_number_bytes);
+
+        // XOR in-place
+        for i in 0..STATIC_IV_LEN {
+            padded_packet_number[i] ^= self.secret[i];
+        }
+
+        Nonce::from(padded_packet_number)
     }
 }
 
