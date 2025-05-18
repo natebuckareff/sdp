@@ -132,12 +132,4 @@ impl ConnectionFrameEncoder {
 
         Ok(())
     }
-
-    // fn encode_stream_header(
-    //     &mut self,
-    //     buf: &mut BytesMut,
-    //     stream_header: StreamHeaderInput,
-    // ) -> Result<()> {
-    //     todo!()
-    // }
 }
