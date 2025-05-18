@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use bytes::BytesMut;
 
+use crate::wire::connection_frame::StreamHeader;
+
 use super::secrets::{AeadKey, HeaderSecret, StaticIv, StreamSecret};
 
 const PACKET_NUMBER_ROLLOVER: u64 = 1 << 62;
@@ -51,7 +53,7 @@ impl StreamCoreCrypto {
         Ok(())
     }
 
-    fn encrypt(&mut self, buf: &mut BytesMut, partial_header_len: usize) -> Result<()> {
+    fn encrypt(&mut self, buf: &mut BytesMut) -> Result<()> {
         // Expected buf format: partial_header || zeroed_packet_number || plaintext
         // plaintext_len = buf.len() - (partial_header_len + 8)
 
@@ -60,7 +62,8 @@ impl StreamCoreCrypto {
             self.rekey().context("failed to rekey")?;
         }
 
-        let header_len = partial_header_len + 8;
+        let header_len = StreamHeader::encoded_masked_len();
+        let partial_header_len = header_len - 8;
 
         if buf.len() < header_len {
             return Err(anyhow::anyhow!("buffer length smaller than header length"));
@@ -92,39 +95,22 @@ impl StreamCoreCrypto {
         Ok(())
     }
 
-    fn decrypt(&mut self, buf: &mut BytesMut, partial_header_len: usize) -> Result<()> {
-        // Expected buf format: masked(partial_header || packet_number) || ciphertext
-        // ciphertext_len = buf.len() - (partial_header_len + 8)
-        // plaintext_len = ciphertext_len - TAG_LEN
-        // TAG_LEN bytes will be removed from buf by truncation
-
-        // Rekey if the counter should rollover
-        if self.counter >= PACKET_NUMBER_ROLLOVER {
-            self.rekey().context("failed to rekey")?;
+    fn decrypt(&mut self, buf: &mut BytesMut, packet_number: u64) -> Result<()> {
+        if buf.len() < StreamHeader::encoded_masked_len() {
+            return Err(anyhow::anyhow!("zero-length masked header"));
         }
-
-        let header_len = partial_header_len + 8;
-
-        if buf.len() < header_len {
-            return Err(anyhow::anyhow!("buffer length smaller than header length"));
-        }
-
-        let mut header_buf = buf.split_to(header_len);
-
-        // Unmask the header
-        self.header_secret
-            .apply_header_mask(&mut header_buf, buf)
-            .context("failed to unmask header")?;
-
-        let packet_number = u64::from_be_bytes(header_buf[partial_header_len..].try_into()?);
-        let nonce = self.static_iv.derive_nonce(packet_number);
 
         if packet_number != self.counter {
             return Err(anyhow::anyhow!("packet number mismatch"));
         }
 
+        let nonce = self.static_iv.derive_nonce(packet_number);
+
+        let mut ciphertext = buf.split_off(StreamHeader::encoded_masked_len());
+        let associated_data = &buf[..StreamHeader::encoded_masked_len()];
+
         self.aead_key
-            .decrypt(nonce, &header_buf, buf)
+            .decrypt(nonce, associated_data, &mut ciphertext)
             .context("decryption failed")?;
 
         self.counter += 1;
@@ -142,8 +128,12 @@ pub struct StreamEncryptor {
 }
 
 impl StreamEncryptor {
-    pub fn encrypt(&mut self, buf: &mut BytesMut, partial_header_len: usize) -> Result<()> {
-        self.core_crypto.encrypt(buf, partial_header_len)
+    pub fn packet_number(&self) -> u64 {
+        self.core_crypto.packet_number()
+    }
+
+    pub fn encrypt(&mut self, buf: &mut BytesMut) -> Result<()> {
+        self.core_crypto.encrypt(buf)
     }
 }
 
@@ -152,8 +142,12 @@ pub struct StreamDecryptor {
 }
 
 impl StreamDecryptor {
-    pub fn decrypt(&mut self, buf: &mut BytesMut, partial_header_len: usize) -> Result<()> {
-        self.core_crypto.decrypt(buf, partial_header_len)
+    pub fn packet_number(&self) -> u64 {
+        self.core_crypto.packet_number()
+    }
+
+    pub fn decrypt(&mut self, buf: &mut BytesMut, packet_number: u64) -> Result<()> {
+        self.core_crypto.decrypt(buf, packet_number)
     }
 }
 
@@ -199,7 +193,7 @@ mod tests {
         let header_and_pn_len = PARTIAL_HEADER_LEN + 8;
         let expected_ciphertext_len = header_and_pn_len + original_plaintext.len() + TAG_LEN;
 
-        encryptor.encrypt(&mut buffer, PARTIAL_HEADER_LEN)?;
+        encryptor.encrypt(&mut buffer)?;
 
         assert_eq!(buffer.len(), expected_ciphertext_len);
         Ok(())
@@ -221,7 +215,7 @@ mod tests {
 
         let mut encrypt_buffer = buffer.clone();
 
-        encryptor.encrypt(&mut encrypt_buffer, partial_header_len)?;
+        encryptor.encrypt(&mut encrypt_buffer)?;
         assert_ne!(encrypt_buffer.as_ref(), buffer.as_ref());
 
         let mut decrypt_buffer = encrypt_buffer.clone();

@@ -14,55 +14,67 @@ WebRTC Mode:
 
 UDP and TCP transports do employ an encryption protocol which is defined in [Encryption Protocol](#encryption-protocol).
 
-
 ## Frame Definition
 
 ```
-frame ::=
-    | connect_packet_type      connect_payload
-    | accept_packet_type       accept_payload
-    | reject_packet_type       reject_payload
-    | start_stream_packet_type start_stream_payload
-    | stream_data_packet_type  stream_data_payload
+connection_frame ::=
+    | 0x00 handshake_connect_payload
+    | 0x01 handshake_accept_payload
+    | 0x02 handshake_reject_payload
+    | 0x03 stream_payload
 
-connect_packet_type      ::= 0x00
-accept_packet_type       ::= 0x01
-reject_packet_type       ::= 0x02
-start_stream_packet_type ::= 0x03
-stream_data_packet_type  ::= 0x04
-
-connect_payload ::=
+handshake_connect_payload ::=
     protocol_version
-    connection_id
+    src_connection_id
     static_public_key
     ephemeral_public_key
     signature
 
-accept_payload ::=
+handshake_accept_payload ::=
     protocol_version
-    connection_id
+    dst_connection_id
+    src_connection_id
     static_public_key
     ephemeral_public_key
     signature
 
-reject_payload ::= connection_id error_code
+handshake_reject_payload ::=
+    dst_connection_id
+    reason_code
+    static_public_key
+    signature
 
-start_stream_payload ::=
-    connection_id
-    mask_header(stream_id, stream_flags)
-
-stream_flags ::=
-    | ordered_stream_flag
-    | unordered_stream_flag
-
-ordered_stream_flag   ::= 0x00
-unordered_stream_flag ::= 0x01
-
-stream_data_payload ::=
-    connection_id
+stream_payload ::=
+    dst_connection_id
     mask_header(stream_id, packet_number)
-    ciphertext
-    auth_tag
+    stream_frame
+    where
+        stream_frame = decrypt(ciphertext, auth_tag)
+
+stream_frame ::=
+    | 0x00 stream_start stream_transmission?
+    | stream_transmission
+
+stream_start ::=
+    stream_flags
+
+stream_transmission ::=
+    | 0x01 stream_data
+    | 0x02 stream_datagram
+    | 0x03 stream_message
+    | 0x04 stream_final_message
+    | stream_end
+
+stream_data     ::= bytes
+stream_datagram ::= bytes
+
+stream_message ::=
+    message_id
+    offset
+    bytes
+
+stream_final_message ::= stream_message
+stream_end           ::= 0x05
 ```
 
 ## Encryption Protocol
