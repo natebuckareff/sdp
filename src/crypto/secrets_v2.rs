@@ -7,6 +7,8 @@ use zeroize::Zeroizing;
 
 use crate::protocol::Side;
 
+use super::identity::Identity;
+
 fn hkdf_expand<const N: usize>(ikm: &[u8], label: &str) -> Result<Zeroizing<[u8; N]>> {
     let mut okm = Zeroizing::new([0u8; N]);
     let hkdf = hkdf::Hkdf::<sha2::Sha256>::new(None, ikm);
@@ -24,6 +26,16 @@ pub struct ConnectionSecretBuilder {
 }
 
 impl ConnectionSecretBuilder {
+    fn new() -> Self {
+        Self {
+            side: None,
+            c_sk: None,
+            c_pk: None,
+            pq_sk: None,
+            pq_ct: None,
+        }
+    }
+
     pub fn set_side(mut self, side: Side) -> Self {
         self.side = Some(side);
         self
@@ -79,7 +91,7 @@ impl ConnectionSecretBuilder {
             }
         };
 
-        ConnectionSecret::new(side, ss)
+        ConnectionSecret::create(side, ss)
     }
 }
 
@@ -91,7 +103,11 @@ pub struct ConnectionSecret {
 }
 
 impl ConnectionSecret {
-    fn new(side: Side, ikm: &[u8]) -> Result<Self> {
+    pub fn new() -> ConnectionSecretBuilder {
+        ConnectionSecretBuilder::new()
+    }
+
+    fn create(side: Side, ikm: &[u8]) -> Result<Self> {
         let label = format!("sdp connection 0 {}", side);
         let secret = hkdf_expand(ikm, &label)?;
         Ok(Self {
