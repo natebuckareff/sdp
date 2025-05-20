@@ -1,0 +1,364 @@
+# SDP protocol spec
+
+# All integer values are encoded in big-endian format
+
+Handshake
+=========
+
+# MSB of the packet number being not set identifies this as a handshake frame
+
+handshake_frame ::=
+    packet_number               # 8 B, MSB=0
+    key_exchange_frame+
+
+# Multiple key_exchange_frames may be packed into a single handshake frame
+
+# If a key_exchange_frame cannot fit into a single handshake frame it will be
+# fragmented. In that case, the frames are reassembled in order based on the
+# packet_number
+
+key_exchange_frame ::=
+    | connect_frame
+    | accept_frame
+    | declaration_frame
+    | reject_frame
+
+# Key exchange starts with with the SEND-side sending a connect frame. Both
+# sides must agree on the protocol version and connection flags. Flags configure
+# connection-ID-length, enables the public key fingerprint field, and other
+# connection parameters.
+
+# Signatures cover the entire frame, except the signature field itself.
+# Signatures must be verified after the frame is reassembled. Receiver may send
+# unknown_fingerprint without verifying the enclosed signature to protect
+# against CPU-cost attacks
+
+connect_frame ::=
+    packet_type                 # 1 B
+    length                      # 2 B
+    protocol_version            # 4 B
+    connect_flags               # 1 B
+    connection_id_length        # 1 B, allowed values 1..20, 0 is reserved
+    stream_id_length            # 1 B, allowed values 1-8, 0 is reserved
+    src_connection_id           # min 2 B
+    static_public_key           # 32 B
+    connect_key_exchange        # TODO
+    signature
+
+connect_flags ::=
+    | (crypto_mode << 6)        # 2 bits
+
+# The crypto mode determines selection of either classical, hybrid, or pq frame
+# types for remainder of the handshake flow
+
+# classical_only
+# -> ed25519_public_key
+# -> connect_classical_kxch
+
+# hybrid
+# -> fingerprint
+# -> connect_hybrid_kxch
+
+# post_quantum_only
+# -> fingerprint
+# -> connect_pq_key_kxch
+
+crypto_mode ::=
+    | classical_only            # 0b00
+    | hybrid                    # 0b01
+    | post_quantum_only         # 0b10
+
+connect_key_exchange ::=
+    | connect_classical_kxch
+    | connect_hybrid_kxch
+    | connect_pq_key_kxch
+
+connect_classical_kxch ::=
+    x25519_public_key           # 32 B
+
+connect_hybrid_kxch ::=
+    x25519_public_key           # 32 B
+    mlkem768_public_key         # 1184 B
+
+connect_pq_key_kxch ::=
+    mlkem768_public_key         # 1184 B
+
+# RECV-side peer may respond to a connect frame by sending an accept frame. The
+# protocol version must be the same or compatible with the SEND-side version.
+# The connection flags may be disjoint from the SEND-side flags, and the
+# SEND-side may reject them. The `dst_connection_id` identifies the connect
+# frame this accept frame is in response to. SEND-side must send all future
+# frames to `src_connection_id`. RECV-side must send all future frames to
+# `dst_connection_id`
+
+accept_frame ::=
+    packet_type                 # 1 B
+    length                      # 2 B
+    protocol_version            # 4 B
+    connection_flags            # 1 B
+    dst_connection_id           # min 2 B
+    src_connection_id           # min 2 B
+    static_public_key           # 32 B
+    accept_key_exchange
+    signature
+
+accept_key_exchange ::=
+    | accept_classical_kxch
+    | accept_hybrid_kxch
+    | accept_pq_key_kxch
+
+accept_classical_kxch ::=
+    x25519_public_key           # 32 B
+
+accept_hybrid_kxch ::=
+    x25519_public_key           # 32 B
+    mlkem768_ciphertext         # 1088 B
+
+accept_pq_key_kxch ::=
+    mlkem768_ciphertext         # 1088 B
+
+# stsatic_public_key field type is determined by crypto_mode
+
+# crypto_mode.classical_only    -> static_public_key
+# crypto_mode.hybrid            -> fingerprint
+# crypto_mode.post_quantum_only -> fingerprint
+
+static_public_key ::=
+    | ed25519_public_key        # 32 B
+    | fingerprint               # 32 B
+
+# Declaration frames must be sent if a fingerprint field is omitted from either
+# the connect or accept frames. Otherwise, declaration frames may be sent in
+# response to a `unknown_fingerprint` rejection. Fingerprints and declarations
+# are only relevant to post-quantum modes
+
+declaration_frame ::=
+    packet_type                 # 1 B
+    length                      # 2 B
+    mldsa65_public_key          # TODO
+
+# SEND or RECV sides may send reject frames if an error occurs during the
+# handshake. The connection is immediately closed after a rejection and any
+# connection IDs may be reused
+
+reject_frame ::=
+    packet_type                 # 1 B
+    length                      # 2 B
+    reason_code                 # 1 B
+    signature
+
+# protocol_version -> Incompatible protocol versions
+
+# connection_id_length -> Incompatible connection ID lengths
+
+# public_key_denied -> Authentication and/or authorization failed
+
+# unknown_fingerprint -> Receiver no longer has the public key associated with a
+# previously used fingerprint. Sender may send a declaration frame with their
+# public key. Receiver will replay their previously sent frames using the
+# refreshed public key
+
+# unknown_error -> Any other error
+
+reason_code ::=
+    | protocol_version          # 0x00
+    | connection_id_length      # 0x01
+    | public_key_denied         # 0x02
+    | unknown_fingerprint       # 0x03
+    | protocol_error            # 0xff
+
+# Signature mode is determined by connect_flags.crypto_mode. If a frame's
+# signature encoding does not match connect_flags.crypto_mode, the receiver must
+# respond with protocol_error and abandon the connection
+
+# crypto_mode.classical_only    -> signature_classical
+# crypto_mode.hybrid            -> signature_pq
+# crypto_mode.post_quantum_only -> signature_pq
+
+signature ::=
+    | signature_classical
+    | signature_pq
+
+signature_classical ::=
+    ed25519_signature           # 64 B
+    
+signature_pq ::=
+    mldsa65_signature           # 3309 B
+
+# Hash of a peer's public key to leverage a remote peer's public key cache
+
+fingerprint ::=
+    sha256("mldsa65" || mldsa65_public_key)
+
+Connections
+===========
+
+# MSB of the packet number being set identifies this as a connection frame
+
+# The packet number (except the MSB) and flags are masked using a header mask
+# derived from a sample of the stream frame ciphertext
+
+# Connection frame must be deduplicated by packet number to protect against
+# nonce reuse
+
+# stream_frames are never fragmented like handshake_frames. All stream_frames
+# must fit into a single connection_frame. stream_frames are designed to be
+# small and easily fragmented and reassembled accross packet numbers
+
+connection_frame ::=
+    packet_number               # 8 B, MSB=1
+    flags                       # 1 B
+    connection_id               # 1-20 B
+    stream_frame+
+
+# Each peer must initialize their internal phase bit and counter to zero. When
+# the packet number of any stream reaches 1 << 62, that peer must flip their
+# internal phase bit, increments the phase counter, and rekeys all key material.
+# Subsequent connection frames sent by this peer will have the phase bit set
+
+# When a peer receives a connection frame with a phase bit different than what
+# was expected, that peer must also start the rekey process
+
+# Both peers must keep both the old and new keys for some time until all frames
+# with the old phase bit are flushed
+
+flags ::=
+    | phase_bit                 # 0b1
+
+stream_frame ::=
+    | stream_start_frame
+    | stream_data_frame
+    | stream_datagram_frame
+    | stream_message_frame
+
+# Peers start a new stream by sending a stream_start_frame. Stream IDs must
+# never be reused for the same connection
+
+stream_start_frame ::=
+    packet_type                 # 1 B
+    stream_id                   # 1-8 B
+
+# Streams by default are reliable, ordered, byte-streams. Data is sent on a
+# stream in this mode using stream_data_frames
+
+stream_data_frame ::=
+    packet_type                 # 1 B
+    stream_id                   # 1-8 B
+    length
+    byte+
+
+# Both reliable and unreliable, unordered datagram frames may be sent on a
+# stream. Datagram frames must be sent as a single connection frame with no
+# other frame types packed. Reliable datagram frames will be eventually
+# received. Unreliable datagram frames may be dropped by the network and never
+# received. Both datagram frames may be received out-of-order
+
+stream_datagram_frame ::=
+    packet_type                 # 1 B
+    stream_id                   # 1-8 B
+    byte+
+
+# Message frames are reliable, but out-of-order with respect to IDs. Message
+# frames will be eventually received and reassembled once all frames for a given
+# message ID are received.
+
+stream_message_frame ::=
+    packet_type                 # 1 B
+    stream_id                   # 1-8 B
+    message_id
+    offset
+    length
+    byte+
+
+# Once a stream_end_frame is received, the sender must not send any stream
+# frames for that stream ID with a greater or equal packet number
+
+stream_end_frame ::=
+    packet_type                 # 1 B
+    stream_id                   # 1-8 B
+
+Connection Secrets and Keys
+===========================
+
+classical_secret = diffie_hellman(
+    x25519_secret_key,
+    x25519_public_key
+)
+
+pq_secret = decapsulate(
+    mlkem768_ciphertext,
+    mlkem768_secret_key
+)
+
+shared_secret = classical_secret || pq_secret,
+
+# side = `send` for SEND-side
+# side = `recv` for RECV-side
+
+# Each side derives two connection keys from the shared secret, one for each
+# side.
+
+# The SEND-side uses "send" keys to encrypt data it sends
+# The SEND-side uses "recv" keys to decrypt data it receives
+
+# The RECV-side uses "recv" keys to encrypt data it sends
+# The RECV-side uses "send" keys to decrypt data it receives
+
+# Whenever either side receives a connect frame with the phase bit set to a
+# different value than their current connection state, they increment their
+# phase counter, rekey their connection key, and re-derive all other keys
+
+# TODO: better explain when and how phase increment occurs
+
+hkdf(ikm, label) =
+    prk = hkdf_extract_sha256(ikm)
+    hkdf_expand_sha256(prk, label)
+
+connection_secret = hkdf(
+    shared_secret,
+    "sdp connection {phase} {side}"
+)
+
+header_key = hkdf(connection_secret, "sdp header {side}")
+static_iv  = hkdf(connection_secret, "sdp static iv {side}")
+stream_key = hkdf(connection_secret, "sdp aead {side}")
+
+Connection Encryption and Decryption 
+====================================
+
+associated_data = # TODO: All unencrypted fields must be included
+
+nonce = static_iv ^ 12bytes_left_padded(packet_number, 0)
+
+ciphertext, auth_tag = chacha20poly1305_aead_encrypt(
+    nonce,
+    stream_key,
+    associated_data,
+    plaintext
+)
+
+plaintext = chacha20poly1305_aead_decrypt(
+    nonce,
+    stream_key,
+    associated_data,
+    ciphertext
+)
+
+Connection Header Masking
+=========================
+
+# Derive a header mask from the header key and a sample of the first 12 bytes of
+# the stream_frame ciphertext. The 12-byte sample is used as nonce for
+# encrypting 9 zero bytes using chacha20. MSB of the mask is set to 0 so as to
+# not effect the MSB of the packet number
+
+derive_header_mask(header_key, encrypt(stream_frame)) =
+    nonce = enrypt(stream_frame)[..12]
+    mask = chacha20_encrypt(nonce, header_key, [0u8; 8 + 1])
+    mask[0] &= ~(1 << 7)
+    mask
+
+# Connection frame header is masked by XORing with the header mask
+
+apply_mask(header_mask, connection_frame) =
+    connection_frame[..9] ^= header_mask
