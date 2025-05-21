@@ -117,7 +117,7 @@ accept_hybrid_kxch ::=
 accept_pq_key_kxch ::=
     mlkem768_ciphertext         # 1088 B
 
-# stsatic_public_key field type is determined by crypto_mode
+# static_public_key field type is determined by crypto_mode
 
 # crypto_mode.classical_only    -> static_public_key
 # crypto_mode.hybrid            -> fingerprint
