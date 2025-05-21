@@ -7,7 +7,7 @@ use chacha20poly1305::aead::AeadMutInPlace;
 use x25519_dalek::SharedSecret;
 use zeroize::Zeroizing;
 
-use crate::protocol::{ConnectionBond, Side};
+use crate::protocol::Side;
 
 // Make constants public for use in tests and other modules if needed
 pub const CONNECTION_SECRET_LEN: usize = 32;
@@ -28,16 +28,14 @@ fn hkdf_expand<const N: usize>(ikm: &[u8], label: &str) -> Result<Zeroizing<[u8;
 
 pub struct ConnectionSecret {
     side: Side,
-    bond: ConnectionBond,
     secret: Zeroizing<[u8; CONNECTION_SECRET_LEN]>,
 }
 
 impl ConnectionSecret {
-    pub fn new(shared_secret: &SharedSecret, side: Side, bond: ConnectionBond) -> Result<Self> {
-        let cid: u32 = bond.get_connection_id(side);
-        let label = format!("sdp connection secret {} {}", cid, side);
+    pub fn new(shared_secret: &SharedSecret, side: Side) -> Result<Self> {
+        let label = format!("sdp connection {}", side);
         let secret = hkdf_expand(shared_secret.as_bytes(), &label)?;
-        Ok(Self { side, bond, secret })
+        Ok(Self { side, secret })
     }
 
     fn len(&self) -> usize {
@@ -45,16 +43,14 @@ impl ConnectionSecret {
     }
 
     fn derive_header_secret(&self) -> Result<HeaderSecret> {
-        let cid: u32 = self.bond.get_connection_id(self.side);
-        let label = format!("sdp header secret {} {}", cid, self.side);
+        let label = format!("sdp header {}", self.side);
         let secret = hkdf_expand::<HEADER_SECRET_LEN>(self.secret.as_slice(), &label)?;
         let key = chacha20::Key::from_slice(secret.as_slice());
         Ok(HeaderSecret::new(self.side, *key))
     }
 
     fn derive_stream_secret(&self, stream_id: u32) -> Result<StreamSecret> {
-        let cid: u32 = self.bond.get_connection_id(self.side);
-        let label = format!("sdp stream secret {} {} {}", cid, stream_id, self.side);
+        let label = format!("sdp stream {} {}", stream_id, self.side);
         let secret = hkdf_expand::<STREAM_SECRET_LEN>(self.secret.as_slice(), &label)?;
         Ok(StreamSecret {
             side: self.side,

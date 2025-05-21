@@ -1,4 +1,5 @@
 mod connection_crypto;
+mod identity;
 mod secrets;
 mod secrets_v2;
 mod stream_crypto;

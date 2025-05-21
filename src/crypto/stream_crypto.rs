@@ -96,6 +96,9 @@ impl StreamCoreCrypto {
     }
 
     fn decrypt(&mut self, buf: &mut BytesMut, packet_number: u64) -> Result<()> {
+        // Input buf: stream_id || packet_number || encrypted(stream_frame)
+        // Output buf: decrypted(stream_frame)
+
         if buf.len() < StreamHeader::encoded_masked_len() {
             return Err(anyhow::anyhow!("zero-length masked header"));
         }

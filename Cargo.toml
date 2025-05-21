@@ -6,11 +6,15 @@ edition = "2024"
 [dependencies]
 aead = { version = "0.5.2", features = ["bytes", "std"] }
 anyhow = "1.0.98"
+bitflags = "2.9.1"
 bytes = "1.10.1"
 chacha20 = "0.9.1"
 chacha20poly1305 = "0.10.1"
+derive_more = { version = "2.0.1", features = ["from"] }
 ed25519-dalek = "2.1.1"
 hkdf = "0.12.4"
+int-enum = "1.2.0"
+pqcrypto = "0.18.1"
 rand_core = "0.6"
 sha2 = "0.10.9"
 x25519-dalek = "2.0.1"
