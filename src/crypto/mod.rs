@@ -5,5 +5,5 @@ mod secrets_v2;
 mod stream_crypto;
 
 pub use connection_crypto::*;
-pub use secrets_v2::HeaderSecret;
+pub use secrets_v2::{HeaderSecret, StaticIv, StreamKey};
 pub use stream_crypto::*;
