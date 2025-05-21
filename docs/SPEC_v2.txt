@@ -12,31 +12,22 @@ varint ::=
 traffic_frame ::=
     masked_header
     traffic_flags  # 1 B
-    connection_id? # optional varint, present if is_connection
+    connection_id? # optional varint, present if not is_handshake
     stream_frame+
 
 # The frame must start with a packet number that uniquely identifies this frame
 # for a given connection ID. If no connection ID is present, the packet number
 # must be unique for all other non-connection frames
 
-# If is_connection is set, masked_header is masked using an encrypted sample of
-# stream_frame ciphertext
+# If is_handshake is not set, masked_header is masked using an encrypted sample
+# of stream_frame ciphertext
 
 masked_header ::=
-    packet_number        # varint
-    masked_traffic_flags
-
-masked_traffic_flags ::=
-    | is_datagram  # 1 bit
-
-# If is_connection is set, a connection_id is present, masked_header is masked,
-# and stream_frame data is encrypted
+    | packet_number # varint
 
 traffic_flags ::=
-    | is_connection # 1 << 6
-    | phase         # 1 << 5
-
-----------------------------------------------------------------
+    | is_handshake
+    | phase
 
 stream_frame ::=
     | stream_data_frame
@@ -46,7 +37,7 @@ stream_frame ::=
 stream_data_frame ::=
     stream_data_type  # 4 bits
     stream_data_flags # 4 bits
-    stream_id?        # optional varint, present if is_connection
+    stream_id?        # optional varint, present if not is_handshake
     offset            # varint
     length?           # optional varint, present if not is_last_frame
     byte+
@@ -58,26 +49,69 @@ stream_data_type ::=
 stream_data_flags ::=
     | is_last_frame
 
-----------------------------------------------------------------
-
 # Unordered, optionally reliable message streams
 stream_message_frame ::=
-    stream_message_type  # 4 bits
+    frame_type           # 4 bits
     stream_message_flags # 4 bits
-    stream_id?           # optional varint, present if is_connection
+    stream_id?           # optional varint, present if not is_handshake
     message_id?          # optional varint, present if is_multi_frame
     offset               # varint
     length?              # optional varint, present if not is_last_frame
     byte+
 
 stream_message_flags ::=
-    | is_last_frame
+    | stream_data_flags
     | is_multi_frame
 
-----------------------------------------------------------------
-
 handshake_packet ::=
-    | connect_packet  # sender initiates handshake
-    | identity_packet # sender identity
-    | accept_packet   # receiver accepts handshake
-    | reject_packet   # sender or receiver rejects handshake
+    | connect_packet # sender initiates handshake
+    | accept_packet  # receiver accepts handshake
+    | reject_packet  # sender or receiver rejects handshake
+
+connect_packet ::=
+    packet_type          # 1 B
+    protocol_version     # 4 B
+    crypto_flags         # 1 B
+    src_connection_id    # varint
+    identity
+    connect_key_exchange
+    signature
+
+crypto_flags ::=
+    | is_classical
+    | is_hybrid
+    | is_post_quantum
+
+identity ::=
+    ed25519_public_key? # 32 B, if is_classical
+    mldsa65_public_key? # ?? B, if not is_classical
+
+connect_key_exchange ::=
+    x25519_public_key?  # 32 B, if is_classical or is_hybrid
+    mlkem768_public_key # ?? B, if is_hybrid or is_post_quantum
+
+accept_packet ::=
+    packet_type         # 1 B
+    protocol_version    # 4 B
+    crypto_flags        # 1 B
+    dst_connection_id   # varint
+    src_connection_id   # varint
+    identity
+    accept_key_exchange
+    signature
+
+accept_key_exchange ::=
+    x25519_public_key?   # 32 B, if is_classical or is_hybrid
+    mlkem768_ciphertext? # ?? B, if is_hybrid or is_post_quantum
+
+reject_packet ::=
+    packet_type # 1 B
+    reason_code # 1 B
+    signature
+
+reason_code ::=
+    ...
+
+signature ::=
+    ed25519_signature? # if is_classical
+    mldsa65_signature? # if not is_classical
