@@ -24,7 +24,7 @@ traffic_frame ::=
 
 masked_header ::=
     packet_number        # varint
-    masked_traffic_flags # 0 B, placeholder
+    masked_traffic_flags
 
 masked_traffic_flags ::=
     | is_datagram  # 1 bit
@@ -44,31 +44,35 @@ stream_frame ::=
 
 # Ordered, reliable byte streams
 stream_data_frame ::=
-    data_frame_type # 1 B
-    stream_id?      # optional varint, present if is_connection
-    offset          # varint
-    length?         # optional varint, present if not only frame in traffic frame
+    stream_data_type  # 4 bits
+    stream_data_flags # 4 bits
+    stream_id?        # optional varint, present if is_connection
+    offset            # varint
+    length?           # optional varint, present if not is_last_frame
     byte+
 
-data_frame_type ::=
+stream_data_type ::=
     | data_frame
     | end_of_stream_frame
+
+stream_data_flags ::=
+    | is_last_frame
 
 ----------------------------------------------------------------
 
 # Unordered, optionally reliable message streams
 stream_message_frame ::=
-    message_frame_type # 1 B
-    stream_id?         # optional varint, present if is_connection
-    message_id?        # optional varint, present if large_message_frame
-    offset?            # optional varint, present if large_message_frame
-    length?            # optional varint, present if not only frame in traffic frame
+    stream_message_type  # 4 bits
+    stream_message_flags # 4 bits
+    stream_id?           # optional varint, present if is_connection
+    message_id?          # optional varint, present if is_multi_frame
+    offset               # varint
+    length?              # optional varint, present if not is_last_frame
     byte+
 
-message_frame_type ::=
-    | large_message_frame # fragmented message
-    | small_message_frame # unfragmented message
-    | datagram_frame      # small message, force single datagram
+stream_message_flags ::=
+    | is_last_frame
+    | is_multi_frame
 
 ----------------------------------------------------------------
 
@@ -77,36 +81,3 @@ handshake_packet ::=
     | identity_packet # sender identity
     | accept_packet   # receiver accepts handshake
     | reject_packet   # sender or receiver rejects handshake
-
-~
-
-Feels like different stream frames are the same kind of thing with different
-"modes"
-
-fragmented | ordered | reliable | type
-           |         |          | unreliable datagram
-           |         |        y | reliable datagram
-           |       y |          | x (will wait forever)
-           |       y |        y | datagram stream
-         y |         |          | x (same as unreliable datagram)
-         y |         |        y | x (same as reliable datagram)
-         y |       y |          | x (will wait forever)
-         y |       y |        y | byte stream | message stream
-
-datagram_frame_type ::=
-    | ordered
-    | unordered_reliable
-    | unreliable
-
-datagram
-  reliable
-    ordered   0b000
-    unordered 0b001
-  unreliable  0b010
-
-stream        0b011
-  byte        0b100
-  message     0b101
-
-Ok that's a little more fleshed out, but feels like there is overlap between
-stream_datagram_frame and stream_message_frame

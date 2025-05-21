@@ -156,16 +156,18 @@ impl HeaderSecret {
 
     pub fn apply_header_mask<const N: usize>(
         &self,
-        header_bytes: &mut [u8; N],
-        ciphertext: &[u8],
+        header_bytes: &mut [u8],
+        sample: &[u8],
     ) -> Result<()> {
         use chacha20::cipher::KeyIvInit;
         use chacha20::cipher::StreamCipher;
 
+        if header_bytes.len() != N {
+            return Err(anyhow!("header bytes length mismatch"));
+        }
+
         let mut header_mask = [0u8; N];
-        let nonce: &[u8; 12] = &ciphertext[..12]
-            .try_into()
-            .context("invalid ciphertext sample length")?;
+        let nonce: &[u8; 12] = &sample[..12].try_into().context("invalid sample length")?;
 
         let mut cipher = chacha20::ChaCha20::new(&self.key, nonce.into());
         cipher.apply_keystream(&mut header_mask);
