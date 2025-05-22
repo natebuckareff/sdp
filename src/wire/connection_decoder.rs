@@ -202,9 +202,11 @@ impl ConnectionDecoder {
             Some(stream_id) => self
                 .data_buffers
                 .entry(stream_id.into())
-                .or_insert_with(|| StreamBuffer::new(CHUNK_LEN, 0)),
+                // TODO XXX unwrap
+                .or_insert_with(|| StreamBuffer::new(CHUNK_LEN, 0).unwrap()),
             None => {
-                self.handshake_buffer = Some(StreamBuffer::new(CHUNK_LEN, 0));
+                // TODO XXX unwrap
+                self.handshake_buffer = Some(StreamBuffer::new(CHUNK_LEN, 0).unwrap());
                 unsafe { self.handshake_buffer.as_mut().unwrap_unchecked() }
             }
         };
@@ -270,7 +272,8 @@ impl ConnectionDecoder {
         let message_buffer = self
             .message_buffers
             .entry((stream_id, message_id))
-            .or_insert_with(|| StreamBuffer::new(CHUNK_LEN, 0));
+            // TODO XXX unwrap
+            .or_insert_with(|| StreamBuffer::new(CHUNK_LEN, 0).unwrap());
 
         message_buffer.write(offset, input)?;
         input.advance(length);
