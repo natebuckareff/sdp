@@ -1,3 +1,4 @@
+use anyhow::Result;
 use bytes::BytesMut;
 
 use super::range_window::RangeWindow;
@@ -17,7 +18,7 @@ impl StreamBuffer {
         }
     }
 
-    pub fn write(&mut self, offset: usize, data: &[u8]) {
+    pub fn write(&mut self, offset: usize, data: &[u8]) -> Result<()> {
         let chunk_index = offset / self.chunk_size;
         let chunk_offset = offset % self.chunk_size;
 
@@ -26,9 +27,9 @@ impl StreamBuffer {
             let left = &data[..self.chunk_size];
             let right = &data[self.chunk_size..];
 
-            self.write(offset, left);
-            self.write(offset + self.chunk_size, right);
-            return;
+            self.write(offset, left)?;
+            self.write(offset + self.chunk_size, right)?;
+            return Ok(());
         }
 
         while self.chunk_list.len() <= chunk_index {
@@ -47,7 +48,9 @@ impl StreamBuffer {
 
         chunk[chunk_offset..chunk_offset + data.len()].copy_from_slice(data);
 
-        self.range_window.insert(offset, offset + data.len());
+        self.range_window.insert(offset, offset + data.len())?;
+
+        Ok(())
     }
 
     pub fn consume(&mut self, output: &mut BytesMut) -> bool {

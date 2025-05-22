@@ -209,7 +209,7 @@ impl ConnectionDecoder {
             }
         };
 
-        data_buffer.write(offset, input);
+        data_buffer.write(offset, input)?;
         input.advance(length);
 
         data_buffer.consume(output);
@@ -272,7 +272,7 @@ impl ConnectionDecoder {
             .entry((stream_id, message_id))
             .or_insert_with(|| StreamBuffer::new(CHUNK_LEN, 0));
 
-        message_buffer.write(offset, input);
+        message_buffer.write(offset, input)?;
         input.advance(length);
 
         message_buffer.consume(output);
